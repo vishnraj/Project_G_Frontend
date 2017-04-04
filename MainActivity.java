@@ -3,6 +3,7 @@ import java.io.*;
 import java.io.Console;
 import java.io.File;
 import java.util.Iterator;
+import java.util.HashMap;
 
 import android.Manifest;
 import android.os.Bundle;
@@ -32,12 +33,15 @@ public class MainActivity extends Activity implements OnClickListener {
     private Button Browse;
     private Button Send_File;
     private File selectedFile;
-    private EditText Store_Address;
     private AlertDialog Alert_Dialog;
 
     private String my_load_service = "http://ec2-54-213-232-224.us-west-2.compute.amazonaws.com/test1";
     private String map_quest_key = "ZIepWWgn7Exiak4rFV7s2biRGfknHhit";
     private String map_quest_address_verification_service = "http://www.mapquestapi.com/geocoding/v1/address?";
+
+    // declared here to be modified and used later
+    private String m_postal_code = new String();
+    private String m_store_name = new String();
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -52,7 +56,6 @@ public class MainActivity extends Activity implements OnClickListener {
 
         filePath = (TextView)findViewById(R.id.file_path);
         Browse = (Button)findViewById(R.id.browse);
-        Store_Address = (EditText)findViewById(R.id.Entered_Store_Address);
         Send_File = (Button)findViewById(R.id.send_file);
         Browse.setOnClickListener(this);
         Send_File.setOnClickListener(this);
@@ -93,6 +96,63 @@ public class MainActivity extends Activity implements OnClickListener {
         }
     }
 
+    private void load() {
+        String store_address = ((EditText)findViewById(R.id.Entered_Store_Address)).getText().toString();
+        Log.d("load", store_address);
+
+        if (!request_location_data(store_address)) {
+            generate_dialog_box("Error", "Location could not be sent to server because it did not appear to be valid. Please trying again.");
+            return;
+        }
+
+        m_store_name = ((EditText)findViewById(R.id.Entered_Store_Name)).getText().toString();
+
+        Log.d("load", m_postal_code);
+        Log.d("load", m_store_name);
+
+        // This will generate a dialog box with the data returned from the service
+        // if successful - if it fails, whatever the error is, this will appear in
+        // the dialog box instead
+        send_file();
+    }
+
+    private void send_file() {
+        try {
+            // we will also send the store location and name as a separate blob
+            // in the form of a get reqeust, so that these can be paired with the aisle data
+            // if we receive a response from the server that says that the data is
+            // already in the database, we not send the file
+
+            HashMap<String, String> params = new HashMap<String, String>();
+            params.put("postal_code", m_postal_code);
+            params.put("store_name", m_store_name);
+            HttpUtility.sendPostRequest(my_load_service, params);
+            String[] response = HttpUtility.readMultipleLinesRespone();
+            String message = new String("");
+            for (String line : response) {
+                message += line + '\n';
+            }
+            generate_dialog_box("Response from service", message);
+
+            // we should check for a 400 error code here and
+            // make sure that we do not proceed if that is the
+            // case, as it will indicate (once we have implemented
+            // it in the backend) that the data for this
+            // store is already present in the database
+
+            message = new String("");
+            HttpUtility.sendPostFileRequest(my_load_service, selectedFile);
+            response = HttpUtility.readMultipleLinesRespone();
+            for (String line : response) {
+                message += line + '\n';
+            }
+
+            generate_dialog_box("Response from service", message);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+
     private String construct_location_url(String address) {
         String delims = "[ ]+";
         String[] tokens = address.split(delims);
@@ -111,14 +171,22 @@ public class MainActivity extends Activity implements OnClickListener {
         return url;
     }
 
-    void load() {
-        Store_Address = (EditText)findViewById(R.id.Entered_Store_Address);
-        String text_address = Store_Address.getText().toString();
-        Log.d("onClick", text_address);
-        String url = construct_location_url(text_address);
+    // REQUIRES:
+    // The street address passed into the application
+    // MODIFIES:
+    // String passed in that will hold the required location
+    // data (Street+Zipcode) to be sent to the server
+    // RETURNS:
+    // True if the quality of the data is good or False
+    // if the quality of the data is bad
+    private Boolean request_location_data(String store_address) {
+        String url = construct_location_url(store_address);
 
         String geo_code_quality_code = new String("");
         String geo_code_quality = new String("");
+        String street= new String("");
+        String postal_code = new String("");
+        JSONArray location_data = new JSONArray();
         try {
             HttpUtility.sendGetRequest(url);
             String[] response = HttpUtility.readMultipleLinesRespone();
@@ -128,60 +196,52 @@ public class MainActivity extends Activity implements OnClickListener {
             }
             JSONObject json = new JSONObject(full_response);
             JSONArray results = json.getJSONArray("results");
-            JSONArray location_data = new JSONArray();
             for (int i = 0; i < results.length(); ++i) {
                 if (results.optJSONObject(i).has("locations")) {
                     location_data = (JSONArray) results.optJSONObject(i).get("locations");
                     break;
                 }
             }
-            Integer len = location_data.length();
+
+            // The only reason we do this is because the current api is returning
+            // an array here, which appears to be usually length = 1, but this is done
+            // as a precaution. As a result this will generally be a O(1) operation, as
+            // are able to hash the JSON object in the array for the values we desire.
             for (int i = 0; i < location_data.length(); ++i) {
-                Log.d("LoadingOperations", "in loop");
+                Log.d("request_location_data", "in loop");
                 if (location_data.optJSONObject(i).has("geocodeQualityCode")) {
                     geo_code_quality_code = location_data.optJSONObject(i).get("geocodeQualityCode").toString();
                 }
-                if (location_data.optJSONObject(i).has("geocodeQuality")) {
-                    geo_code_quality = location_data.optJSONObject(i).get("geocodeQuality").toString();
+                if (location_data.optJSONObject(i).has("postalCode")) {
+                    postal_code = location_data.optJSONObject(i).get("postalCode").toString();
                 }
 
-                if (geo_code_quality_code != "" && geo_code_quality != "") {
+                if (geo_code_quality_code != "" && geo_code_quality != "" && postal_code != "") {
                     break;
                 }
             }
-            Log.d("LoadingOperations", geo_code_quality_code);
-            Log.d("LoadingOperations", geo_code_quality);
+            Log.d("request_location_data", geo_code_quality_code);
         } catch (IOException ex) {
             ex.printStackTrace();
         } catch (JSONException ex) {
             ex.printStackTrace();
         }
 
-        try {
-            if (!geo_code_quality.equals("ADDRESS") && !geo_code_quality.equals("POINT") || !Character.toString(geo_code_quality_code.charAt(2)).equals("A")) {
-                Log.d("LoadingOperations1", geo_code_quality);
-                char full_stree_confidence = geo_code_quality_code.charAt(2);
-                Log.d("LoadingOperations1", Character.toString(full_stree_confidence));
-                Alert_Dialog = new AlertDialog.Builder(this).create();
-                Alert_Dialog.setTitle("Error");
-                Alert_Dialog.setMessage("Location could not be sent to server because it did not appear to be valid. Please trying again.");
-                Alert_Dialog.show();
-                return;
-            }
-            HttpUtility.sendPostFileRequest(my_load_service, selectedFile);
-            String[] response = HttpUtility.readMultipleLinesRespone();
-            String message = new String("");
-            for (String line : response) {
-                message += line + '\n';
-            }
-            // next, we will also send the store location and name as a separate blob
-            // in the form of a get reqeust, so that these can be paired with the aisle data
-            Alert_Dialog = new AlertDialog.Builder(this).create();
-            Alert_Dialog.setTitle("Response from service");
-            Alert_Dialog.setMessage(message);
-            Alert_Dialog.show();
-        } catch (IOException ex) {
-            ex.printStackTrace();
+        if (!Character.toString(geo_code_quality_code.charAt(4)).equals("A")) {
+            char full_street_confidence = geo_code_quality_code.charAt(4);
+            Log.d("request_location_data", Character.toString(full_street_confidence));
+            return false;
         }
+        
+        m_postal_code = postal_code;
+
+        return true;
+    }
+
+    private void generate_dialog_box(String title, String message) {
+        Alert_Dialog = new AlertDialog.Builder(this).create();
+        Alert_Dialog.setTitle("Response from service");
+        Alert_Dialog.setMessage(message);
+        Alert_Dialog.show();
     }
 }
