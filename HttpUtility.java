@@ -1,9 +1,7 @@
 package com.locator.vishnu_grocery.myapplication;
-import android.os.AsyncTask;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -183,7 +181,7 @@ public class HttpUtility {
      *             thrown if any I/O error occurred
      */
     public static String[] readMultipleLinesRespone() throws IOException {
-        InputStream inputStream = null;
+        InputStream inputStream;
         if (httpConn != null) {
             inputStream = httpConn.getInputStream();
         } else {
@@ -192,17 +190,17 @@ public class HttpUtility {
  
         BufferedReader reader = new BufferedReader(new InputStreamReader(
                 inputStream));
-        List<String> response = new ArrayList<String>();
+        List<String> response = new ArrayList<>();
  
-        String line = "";
+        String line;
         while ((line = reader.readLine()) != null) {
             response.add(line);
         }
         reader.close();
  
-        return (String[]) response.toArray(new String[0]);
+        return response.toArray(new String[0]);
     }
-     
+
     /**
      * Closes the connection if opened
      */
