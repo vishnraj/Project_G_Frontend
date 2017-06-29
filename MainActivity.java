@@ -26,9 +26,11 @@ public class MainActivity extends Activity implements OnClickListener, PlaceSele
 
     private static final int REQUEST_PICK_FILE = 1;
 
+    boolean m_send_file;
     private TextView m_file_path;
     private File m_selected_file;
     private String m_application_load_service = "http://ec2-54-213-232-224.us-west-2.compute.amazonaws.com/load";
+    private String m_application_retrieve_service = "http://ec2-54-213-232-224.us-west-2.compute.amazonaws.com/retrieve";
     private String m_store_name = "";
     private String m_address = "";
 
@@ -42,13 +44,16 @@ public class MainActivity extends Activity implements OnClickListener, PlaceSele
 
         Button browse = (Button)findViewById(R.id.browse);
         Button send_file = (Button)findViewById(R.id.send_file);
+        Button retrieve_aisles = (Button)findViewById(R.id.retrieve_aisles);
         PlaceAutocompleteFragment autocomplete_fragment = (PlaceAutocompleteFragment) getFragmentManager().findFragmentById(R.id.place_autocomplete_fragment);
 
         browse.setOnClickListener(this);
         send_file.setOnClickListener(this);
+        retrieve_aisles.setOnClickListener(this);
         autocomplete_fragment.setOnPlaceSelectedListener(this);
 
         m_file_path = (TextView)findViewById(R.id.file_path);
+        m_send_file = true;
     }
 
     @Override
@@ -80,6 +85,12 @@ public class MainActivity extends Activity implements OnClickListener, PlaceSele
                             // a separate thread, as the above is doing
                 }
                 break;
+            case R.id.retrieve_aisles:
+                if (m_store_name != null && m_address != null) {
+                    retrieve(); // at some point, we should figure out how to do this work in
+                                // a separate thread, as the above is doing
+                }
+                break;
         }
     }
 
@@ -101,9 +112,34 @@ public class MainActivity extends Activity implements OnClickListener, PlaceSele
         }
     }
 
+    private void retrieve() {
+        HashMap<String, String> params = new HashMap<String, String>();
+        params.put("store_name", m_store_name);
+        params.put("address", m_address);
+
+        try {
+            HttpUtility.sendPostRequest(m_application_retrieve_service, params);
+            String[] response = HttpUtility.readMultipleLinesRespone();
+
+            String message = "";
+            for (String line : response) {
+                message += line + '\n';
+            }
+
+            generate_dialog_box("Response from service", message);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+
     private void load() {
         send_key_data();
-        send_file();
+
+        if (m_send_file) {
+            send_file();
+        } else {
+            m_send_file = true; // reset for the next request
+        }
     }
 
     private void send_key_data() {
@@ -118,6 +154,11 @@ public class MainActivity extends Activity implements OnClickListener, PlaceSele
             String message = "";
             for (String line : response) {
                 message += line + '\n';
+            }
+
+            if (message.contains("FAILED")) {
+                Log.e("send_key_data()", "We had an issue with server processing the keys that were sent for the store.");
+                m_send_file = false;
             }
 
             generate_dialog_box("Response from service", message);
